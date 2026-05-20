@@ -1,18 +1,33 @@
 """
-Qwen3-VL-2B Gym Coach Fine-Tuning
-==================================
+Qwen3-VL Video Rating Fine-Tuning (ShareGPT Multimodal Format)
+===============================================================
 Strategy:
   - Freeze the ViT (strong visual backbone, keep it stable)
   - Freeze the vision-language merger
   - QLoRA on the LLM decoder: q/k/v/o_proj, gate/up/down_proj
+  - DeepSpeed ZeRO-2 for efficient training
+  - Flash Attention 2 for memory-efficient attention
+  - Video input as chunk of frame images
+
+Data format (ShareGPT multimodal):
+  [
+      {
+          "messages": [
+              {"role": "system", "content": "..."},
+              {"role": "user", "content": [
+                  {"type": "video", "video": ["frame_01.jpg", "frame_02.jpg", ...]},
+                  {"type": "text", "text": "Rate this video from 0 to 100."}
+              ]},
+              {"role": "assistant", "content": "85"}
+          ]
+      }
+  ]
 """
 
 import os
 import json
 import torch
-from dataclasses import dataclass
-from pathlib import Path
-from PIL import Image
+from dataclasses import dataclass, field
 from dotenv import load_dotenv
 
 from transformers import (
@@ -23,21 +38,22 @@ from transformers import (
     BitsAndBytesConfig,
 )
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
+from qwen_vl_utils import process_vision_info
 
 load_dotenv()
 
 # ─── Configuration ────────────────────────────────────────────────────────────
 
 MODEL_ID = "Qwen/Qwen3-VL-2B-Instruct"
-OUTPUT_DIR = "./output/qwen3vl-gym-coach"
+OUTPUT_DIR = "./output/qwen3vl-video-rating"
 DATA_PATH = "./data/train.json"
+DS_CONFIG = "./ds_zero2.json"
 
 SYSTEM_PROMPT = (
-    "You are an expert gym coach and certified personal trainer. "
-    "Analyze the user's exercise form from the provided image, identify "
-    "mistakes, and provide clear, actionable corrections. Suggest "
-    "appropriate modifications based on the user's level and always "
-    "prioritize safety and proper technique."
+    "You are a video quality assessment expert. "
+    "Watch the provided video carefully and rate it on a scale from 0 to 100, "
+    "where 0 is the worst possible quality and 100 is perfect. "
+    "Respond with the numerical score first, then a brief analysis."
 )
 
 # LoRA
@@ -54,27 +70,26 @@ NUM_EPOCHS = 3
 BATCH_SIZE = 1
 GRAD_ACCUM = 8
 LEARNING_RATE = 2e-4
-MAX_SEQ_LEN = 2048
+MAX_SEQ_LEN = 4096
 
-# Qwen VL dynamic resolution bounds
-MIN_PIXELS = 256 * 28 * 28
-MAX_PIXELS = 1280 * 28 * 28
+# Qwen3-VL uses 32x32 per visual token (NOT 28x28 which was Qwen2.5-VL)
+MIN_PIXELS = 128 * 32 * 32   # 131_072
+MAX_PIXELS = 512 * 32 * 32   # 524_288  (conservative for video on RTX 5080 16 GB)
 
 
 # ─── Dataset ──────────────────────────────────────────────────────────────────
 
-class GymCoachDataset(torch.utils.data.Dataset):
+class VideoRatingDataset(torch.utils.data.Dataset):
     """
-    Expects a JSON file:
-    [
-        {
-            "image": "data/images/squat_001.jpg",
-            "question": "Analyze my squat form.",
-            "answer": "Your squat shows slight knee valgus..."
-        },
-        ...
-    ]
-    The "image" key is optional; text-only samples are supported.
+    ShareGPT-style multimodal dataset for video rating.
+
+    Each sample is a dict with a ``messages`` list following the standard
+    ShareGPT multi-turn format.  Vision content uses Qwen-VL content items::
+
+        {"type": "video", "video": ["frame_01.jpg", ...]}
+        {"type": "image", "image": "path/to/img.jpg"}
+
+    The last message must be the assistant response containing the rating.
     """
 
     def __init__(self, data_path: str, processor, max_len: int = MAX_SEQ_LEN):
@@ -88,40 +103,28 @@ class GymCoachDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, idx):
         sample = self.samples[idx]
-        has_image = "image" in sample and sample["image"]
+        messages = sample["messages"]
 
-        image = None
-        if has_image:
-            image = Image.open(sample["image"]).convert("RGB")
-            user_content = [
-                {"type": "image", "image": image},
-                {"type": "text", "text": sample["question"]},
-            ]
-        else:
-            user_content = [{"type": "text", "text": sample["question"]}]
+        prompt_messages = messages[:-1]
 
-        full_messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user_content},
-            {"role": "assistant", "content": sample["answer"]},
-        ]
-        prompt_messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user_content},
-        ]
+        image_inputs, video_inputs = process_vision_info(messages)
 
         full_text = self.processor.apply_chat_template(
-            full_messages, tokenize=False, add_generation_prompt=False
+            messages, tokenize=False, add_generation_prompt=False
         )
         prompt_text = self.processor.apply_chat_template(
             prompt_messages, tokenize=False, add_generation_prompt=True
         )
 
-        images = [image] if has_image else None
+        vision_kwargs: dict = {}
+        if image_inputs:
+            vision_kwargs["images"] = image_inputs
+        if video_inputs:
+            vision_kwargs["videos"] = video_inputs
 
         full_inputs = self.processor(
             text=[full_text],
-            images=images,
+            **vision_kwargs,
             return_tensors="pt",
             padding=False,
             truncation=True,
@@ -129,7 +132,7 @@ class GymCoachDataset(torch.utils.data.Dataset):
         )
         prompt_inputs = self.processor(
             text=[prompt_text],
-            images=images,
+            **vision_kwargs,
             return_tensors="pt",
             padding=False,
         )
@@ -146,10 +149,18 @@ class GymCoachDataset(torch.utils.data.Dataset):
             "attention_mask": attention_mask,
             "labels": labels,
         }
-        if "pixel_values" in full_inputs:
-            result["pixel_values"] = full_inputs["pixel_values"]
-        if "image_grid_thw" in full_inputs:
-            result["image_grid_thw"] = full_inputs["image_grid_thw"]
+
+        for key in (
+            "pixel_values", "pixel_values_videos",
+            "image_grid_thw", "video_grid_thw",
+            "mm_token_type_ids",
+        ):
+            if key in full_inputs:
+                val = full_inputs[key]
+                if key == "mm_token_type_ids":
+                    result[key] = val.squeeze(0)
+                else:
+                    result[key] = val
 
         return result
 
@@ -158,36 +169,62 @@ class GymCoachDataset(torch.utils.data.Dataset):
 
 @dataclass
 class VLMCollator:
-    """Pads text sequences and concatenates vision tensors across the batch."""
+    """Pads text-like tensors and concatenates vision tensors across the batch."""
 
     pad_token_id: int = 0
+
+    _SEQ_KEYS: list = field(
+        default_factory=lambda: ["mm_token_type_ids"],
+        repr=False,
+    )
+    _VISION_KEYS: list = field(
+        default_factory=lambda: [
+            "pixel_values", "pixel_values_videos",
+            "image_grid_thw", "video_grid_thw",
+        ],
+        repr=False,
+    )
 
     def __call__(self, examples):
         max_len = max(ex["input_ids"].shape[0] for ex in examples)
 
         input_ids, attention_masks, labels_list = [], [], []
         for ex in examples:
-            seq_len = ex["input_ids"].shape[0]
-            pad_len = max_len - seq_len
-            input_ids.append(
-                torch.cat([ex["input_ids"], torch.full((pad_len,), self.pad_token_id, dtype=ex["input_ids"].dtype)])
-            )
-            attention_masks.append(
-                torch.cat([ex["attention_mask"], torch.zeros(pad_len, dtype=ex["attention_mask"].dtype)])
-            )
-            labels_list.append(
-                torch.cat([ex["labels"], torch.full((pad_len,), -100, dtype=ex["labels"].dtype)])
-            )
+            pad_len = max_len - ex["input_ids"].shape[0]
+            input_ids.append(torch.cat([
+                ex["input_ids"],
+                torch.full((pad_len,), self.pad_token_id, dtype=ex["input_ids"].dtype),
+            ]))
+            attention_masks.append(torch.cat([
+                ex["attention_mask"],
+                torch.zeros(pad_len, dtype=ex["attention_mask"].dtype),
+            ]))
+            labels_list.append(torch.cat([
+                ex["labels"],
+                torch.full((pad_len,), -100, dtype=ex["labels"].dtype),
+            ]))
 
         batch = {
             "input_ids": torch.stack(input_ids),
             "attention_mask": torch.stack(attention_masks),
             "labels": torch.stack(labels_list),
         }
-        if "pixel_values" in examples[0]:
-            batch["pixel_values"] = torch.cat([ex["pixel_values"] for ex in examples], dim=0)
-        if "image_grid_thw" in examples[0]:
-            batch["image_grid_thw"] = torch.cat([ex["image_grid_thw"] for ex in examples], dim=0)
+
+        for key in self._SEQ_KEYS:
+            if key in examples[0]:
+                padded = []
+                for ex in examples:
+                    pad_len = max_len - ex[key].shape[0]
+                    padded.append(torch.cat([
+                        ex[key],
+                        torch.zeros(pad_len, dtype=ex[key].dtype),
+                    ]))
+                batch[key] = torch.stack(padded)
+
+        for key in self._VISION_KEYS:
+            tensors = [ex[key] for ex in examples if key in ex]
+            if tensors:
+                batch[key] = torch.cat(tensors, dim=0)
 
         return batch
 
@@ -213,12 +250,11 @@ def build_model_and_processor():
         MODEL_ID,
         token=os.getenv("HF_TOKEN"),
         quantization_config=bnb_config,
-        device_map="auto",
+        device_map={"": int(os.environ.get("LOCAL_RANK", 0))},
         torch_dtype=torch.bfloat16,
         attn_implementation="flash_attention_2",
     )
 
-    # Freeze ViT and vision-language merger
     for name, param in model.named_parameters():
         if "visual" in name or "merger" in name:
             param.requires_grad = False
@@ -244,7 +280,7 @@ def build_model_and_processor():
 def train():
     model, processor = build_model_and_processor()
 
-    dataset = GymCoachDataset(DATA_PATH, processor)
+    dataset = VideoRatingDataset(DATA_PATH, processor)
     collator = VLMCollator(pad_token_id=processor.tokenizer.pad_token_id)
 
     training_args = TrainingArguments(
@@ -265,6 +301,7 @@ def train():
         dataloader_pin_memory=False,
         remove_unused_columns=False,
         report_to="none",
+        deepspeed=DS_CONFIG,
     )
 
     trainer = Trainer(
@@ -282,8 +319,8 @@ def train():
 
 # ─── Inference ────────────────────────────────────────────────────────────────
 
-def inference(image_path: str, question: str):
-    """Load the fine-tuned LoRA adapter and run a single prediction."""
+def inference(frame_paths: list[str], question: str | None = None):
+    """Load the fine-tuned LoRA adapter and rate a video."""
     from peft import PeftModel
 
     processor = AutoProcessor.from_pretrained(
@@ -302,27 +339,35 @@ def inference(image_path: str, question: str):
     model = PeftModel.from_pretrained(base_model, OUTPUT_DIR)
     model.eval()
 
-    image = Image.open(image_path).convert("RGB")
+    if question is None:
+        question = "Rate this video from 0 to 100."
 
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": [
-            {"type": "image", "image": image},
+            {"type": "video", "video": frame_paths},
             {"type": "text", "text": question},
         ]},
     ]
 
+    image_inputs, video_inputs = process_vision_info(messages)
+
     text = processor.apply_chat_template(
         messages, tokenize=False, add_generation_prompt=True, enable_thinking=False
     )
-    inputs = processor(
-        text=[text], images=[image], return_tensors="pt"
-    ).to(model.device)
+
+    proc_kwargs: dict = {"text": [text], "return_tensors": "pt"}
+    if image_inputs:
+        proc_kwargs["images"] = image_inputs
+    if video_inputs:
+        proc_kwargs["videos"] = video_inputs
+
+    inputs = processor(**proc_kwargs).to(model.device)
 
     with torch.no_grad():
         output_ids = model.generate(
             **inputs,
-            max_new_tokens=512,
+            max_new_tokens=256,
             do_sample=True,
             temperature=0.7,
             top_p=0.9,
@@ -330,9 +375,9 @@ def inference(image_path: str, question: str):
 
     generated = output_ids[0, inputs["input_ids"].shape[1]:]
     response = processor.decode(generated, skip_special_tokens=True)
-    print(f"\n{'='*60}")
-    print(f"Coach: {response}")
-    print(f"{'='*60}")
+    print(f"\n{'=' * 60}")
+    print(f"Rating: {response}")
+    print(f"{'=' * 60}")
     return response
 
 
@@ -340,19 +385,38 @@ def inference(image_path: str, question: str):
 
 if __name__ == "__main__":
     import argparse
+    from pathlib import Path
 
-    parser = argparse.ArgumentParser(description="Qwen3-VL-2B Gym Coach Fine-Tuning")
+    parser = argparse.ArgumentParser(
+        description="Qwen3-VL Video Rating Fine-Tuning",
+    )
     parser.add_argument("--mode", choices=["train", "infer"], default="train")
-    parser.add_argument("--image", type=str, help="Image path (inference mode)")
+    parser.add_argument(
+        "--frames", type=str, nargs="+",
+        help="Frame image paths for inference (space-separated)",
+    )
+    parser.add_argument(
+        "--frames-dir", type=str,
+        help="Directory of frame images (sorted alphabetically)",
+    )
     parser.add_argument(
         "--question", type=str,
-        default="Analyze my exercise form and suggest improvements.",
+        default="Rate this video from 0 to 100.",
     )
     args = parser.parse_args()
 
     if args.mode == "train":
         train()
     else:
-        if not args.image:
-            parser.error("--image is required for inference mode")
-        inference(args.image, args.question)
+        if args.frames_dir:
+            frame_dir = Path(args.frames_dir)
+            frame_paths = sorted(
+                str(p) for p in frame_dir.iterdir()
+                if p.suffix.lower() in {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
+            )
+        elif args.frames:
+            frame_paths = args.frames
+        else:
+            parser.error("--frames or --frames-dir required for inference mode")
+
+        inference(frame_paths, args.question)

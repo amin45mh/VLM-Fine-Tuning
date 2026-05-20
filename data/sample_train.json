@@ -1,21 +1,134 @@
 [
     {
-        "image": "data/images/squat_001.jpg",
-        "question": "How is my squat form? What should I improve?",
-        "answer": "Looking at your squat, I notice a few key areas for improvement:\n\n1. **Knee Tracking**: Your knees are caving inward (valgus collapse). Focus on pushing your knees out over your toes throughout the movement.\n\n2. **Depth**: You're stopping about 2 inches short of parallel. Aim to get your hip crease at or below knee level.\n\n3. **Back Position**: There's slight rounding in your lower back at the bottom of the movement. Engage your core and keep your chest up.\n\n**Recommended drills**: Goblet squats with a 3-second pause at the bottom, and banded squats to reinforce the knees-out cue."
+        "messages": [
+            {
+                "role": "system",
+                "content": "You are a video quality assessment expert. Watch the provided video carefully and rate it on a scale from 0 to 100, where 0 is the worst possible quality and 100 is perfect. Respond with the numerical score first, then a brief analysis."
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "video",
+                        "video": [
+                            "data/frames/video_001/frame_001.jpg",
+                            "data/frames/video_001/frame_002.jpg",
+                            "data/frames/video_001/frame_003.jpg",
+                            "data/frames/video_001/frame_004.jpg",
+                            "data/frames/video_001/frame_005.jpg",
+                            "data/frames/video_001/frame_006.jpg",
+                            "data/frames/video_001/frame_007.jpg",
+                            "data/frames/video_001/frame_008.jpg"
+                        ]
+                    },
+                    {
+                        "type": "text",
+                        "text": "Rate this video from 0 to 100."
+                    }
+                ]
+            },
+            {
+                "role": "assistant",
+                "content": "82\n\nThe video demonstrates good overall quality with stable framing and consistent lighting. Minor motion blur is present in frames 3-5 during the transition, and the color grading is slightly warm. Composition follows the rule of thirds effectively."
+            }
+        ]
     },
     {
-        "image": "data/images/deadlift_001.jpg",
-        "question": "Can you check my deadlift? I feel lower back pain after sets.",
-        "answer": "I can see the likely cause of your lower back pain:\n\n1. **Back Rounding**: Your lumbar spine is flexing significantly under load. Before you pull, brace your core hard, take a deep breath into your belly, and think about \"pushing the floor away\" rather than pulling the bar up.\n\n2. **Bar Path**: The bar is drifting forward away from your shins. Keep the bar dragging along your legs throughout the lift.\n\n3. **Hip Hinge**: You're initiating the lift with your back rather than your legs. Push through your heels and drive your hips forward.\n\n**Action plan**: Reduce the weight by 20%, focus on Romanian deadlifts to build the hip hinge pattern, and film yourself from the side to monitor bar path."
+        "messages": [
+            {
+                "role": "system",
+                "content": "You are a video quality assessment expert. Watch the provided video carefully and rate it on a scale from 0 to 100, where 0 is the worst possible quality and 100 is perfect. Respond with the numerical score first, then a brief analysis."
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "video",
+                        "video": [
+                            "data/frames/video_002/frame_001.jpg",
+                            "data/frames/video_002/frame_002.jpg",
+                            "data/frames/video_002/frame_003.jpg",
+                            "data/frames/video_002/frame_004.jpg",
+                            "data/frames/video_002/frame_005.jpg",
+                            "data/frames/video_002/frame_006.jpg"
+                        ]
+                    },
+                    {
+                        "type": "text",
+                        "text": "Rate this video from 0 to 100."
+                    }
+                ]
+            },
+            {
+                "role": "assistant",
+                "content": "45\n\nThe video suffers from significant quality issues. There is noticeable camera shake throughout, exposure is inconsistent between frames, and compression artifacts are visible especially in darker regions. The subject is partially out of focus in several frames."
+            }
+        ]
     },
     {
-        "image": "data/images/bench_001.jpg",
-        "question": "Rate my bench press setup and form.",
-        "answer": "Your bench press setup has some good elements but needs refinement:\n\n**What's good**: You have a solid grip width and your feet are flat on the floor.\n\n**Areas to improve**:\n\n1. **Arch**: You need more upper back tightness. Retract and depress your scapulae before unracking. Think about pinching a pencil between your shoulder blades.\n\n2. **Bar Path**: You're pressing straight up. The optimal path is a slight diagonal from the lower chest toward the face at lockout.\n\n3. **Elbow Angle**: Your elbows are flared at nearly 90 degrees, which puts excessive stress on your shoulders. Tuck them to about 45-75 degrees.\n\n**Safety note**: Always use a spotter or safety pins when training heavy."
+        "messages": [
+            {
+                "role": "system",
+                "content": "You are a video quality assessment expert. Watch the provided video carefully and rate it on a scale from 0 to 100, where 0 is the worst possible quality and 100 is perfect. Respond with the numerical score first, then a brief analysis."
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "video",
+                        "video": [
+                            "data/frames/video_003/frame_001.jpg",
+                            "data/frames/video_003/frame_002.jpg",
+                            "data/frames/video_003/frame_003.jpg",
+                            "data/frames/video_003/frame_004.jpg",
+                            "data/frames/video_003/frame_005.jpg",
+                            "data/frames/video_003/frame_006.jpg",
+                            "data/frames/video_003/frame_007.jpg",
+                            "data/frames/video_003/frame_008.jpg",
+                            "data/frames/video_003/frame_009.jpg",
+                            "data/frames/video_003/frame_010.jpg"
+                        ]
+                    },
+                    {
+                        "type": "text",
+                        "text": "Rate this video from 0 to 100."
+                    }
+                ]
+            },
+            {
+                "role": "assistant",
+                "content": "93\n\nExcellent video quality. The footage is sharp with accurate colors and smooth temporal transitions between frames. Lighting is professional-grade with well-controlled highlights and shadows. Minimal noise even in low-light areas. The only minor deduction is a very slight lens flare visible in the last two frames."
+            }
+        ]
     },
     {
-        "question": "Design a 3-day full body workout routine for a beginner focused on building muscle.",
-        "answer": "Here's a 3-day full body routine for a beginner:\n\n**Day A (Monday)**:\n- Barbell Back Squat: 3x8\n- Bench Press: 3x8\n- Barbell Row: 3x10\n- Dumbbell Lateral Raise: 3x12\n- Plank: 3x30-45s\n\n**Day B (Wednesday)**:\n- Romanian Deadlift: 3x10\n- Overhead Press: 3x8\n- Lat Pulldown: 3x10\n- Dumbbell Lunges: 3x10 each leg\n- Cable Crunch: 3x15\n\n**Day C (Friday)**:\n- Conventional Deadlift: 3x5\n- Incline Dumbbell Press: 3x10\n- Seated Cable Row: 3x10\n- Leg Press: 3x12\n- Face Pulls: 3x15\n\n**Guidelines**: Rest 2-3 minutes between compound lifts, 60-90 seconds for isolation. Increase weight when you can complete all sets with good form. Prioritize sleep (7-9 hours) and protein intake (1.6-2.2g per kg bodyweight)."
+        "messages": [
+            {
+                "role": "system",
+                "content": "You are a video quality assessment expert. Watch the provided video carefully and rate it on a scale from 0 to 100, where 0 is the worst possible quality and 100 is perfect. Respond with the numerical score first, then a brief analysis."
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "video",
+                        "video": [
+                            "data/frames/video_004/frame_001.jpg",
+                            "data/frames/video_004/frame_002.jpg",
+                            "data/frames/video_004/frame_003.jpg",
+                            "data/frames/video_004/frame_004.jpg"
+                        ]
+                    },
+                    {
+                        "type": "text",
+                        "text": "Rate this video from 0 to 100."
+                    }
+                ]
+            },
+            {
+                "role": "assistant",
+                "content": "21\n\nPoor video quality. The footage is extremely grainy with heavy compression artifacts throughout. White balance is severely off, producing a strong blue-green cast. Multiple frames show heavy motion blur suggesting very low shutter speed. Resolution appears well below the expected standard."
+            }
+        ]
     }
 ]
