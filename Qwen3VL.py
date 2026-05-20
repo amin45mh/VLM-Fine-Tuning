@@ -9,6 +9,13 @@ Strategy:
   - Flash Attention 2 for memory-efficient attention
   - Video input as chunk of frame images
 
+Pipeline:
+  1. ``preprocess`` — takes raw videos + annotations, extracts frames
+     at a target FPS, and writes the ShareGPT training JSON.
+  2. ``train``       — fine-tunes Qwen3-VL on the generated JSON.
+  3. ``infer``       — accepts a raw video file, extracts frames on
+     the fly, and returns a 0-100 rating.
+
 Data format (ShareGPT multimodal):
   [
       {
@@ -22,12 +29,20 @@ Data format (ShareGPT multimodal):
           ]
       }
   ]
+
+Annotations file fed to ``preprocess`` (JSON):
+  [
+      {"video": "raw_videos/clip_001.mp4", "rating": 85,
+       "analysis": "Good overall quality ..."},
+      ...
+  ]
 """
 
 import os
 import json
 import torch
 from dataclasses import dataclass, field
+from pathlib import Path
 from dotenv import load_dotenv
 
 from transformers import (
@@ -75,6 +90,115 @@ MAX_SEQ_LEN = 4096
 # Qwen3-VL uses 32x32 per visual token (NOT 28x28 which was Qwen2.5-VL)
 MIN_PIXELS = 128 * 32 * 32   # 131_072
 MAX_PIXELS = 512 * 32 * 32   # 524_288  (conservative for video on RTX 5080 16 GB)
+
+# Video preprocessing
+EXTRACT_FPS = 6
+FRAMES_DIR = "./data/frames"
+
+
+# ─── Video Preprocessing ─────────────────────────────────────────────────────
+
+def extract_frames(
+    video_path: str,
+    output_dir: str,
+    fps: float = EXTRACT_FPS,
+) -> list[str]:
+    """Extract frames from *video_path* at *fps* and save as JPEGs.
+
+    Returns the list of saved frame paths (sorted).
+    """
+    import cv2
+
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        raise RuntimeError(f"Cannot open video: {video_path}")
+
+    src_fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+    frame_interval = max(1, round(src_fps / fps))
+
+    out_dir = Path(output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    saved: list[str] = []
+    frame_idx = 0
+    write_idx = 1
+
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+        if frame_idx % frame_interval == 0:
+            out_path = out_dir / f"frame_{write_idx:06d}.jpg"
+            cv2.imwrite(str(out_path), frame)
+            saved.append(str(out_path))
+            write_idx += 1
+        frame_idx += 1
+
+    cap.release()
+    print(
+        f"  {Path(video_path).name}: {total_frames} source frames @ {src_fps:.1f} fps "
+        f"→ {len(saved)} extracted @ {fps} fps"
+    )
+    return saved
+
+
+def preprocess_videos(
+    annotations_path: str,
+    frames_root: str = FRAMES_DIR,
+    output_json: str = DATA_PATH,
+    fps: float = EXTRACT_FPS,
+) -> None:
+    """Read an annotations file, extract frames, and write ShareGPT JSON.
+
+    Annotations format (JSON list)::
+
+        [
+            {
+                "video": "raw_videos/clip_001.mp4",
+                "rating": 85,
+                "analysis": "Good overall quality ..."   # optional
+            },
+            ...
+        ]
+    """
+    with open(annotations_path) as f:
+        annotations = json.load(f)
+
+    samples: list[dict] = []
+
+    for ann in annotations:
+        video_path = ann["video"]
+        video_stem = Path(video_path).stem
+        frame_dir = str(Path(frames_root) / video_stem)
+
+        frame_paths = extract_frames(video_path, frame_dir, fps=fps)
+
+        rating = str(ann["rating"])
+        analysis = ann.get("analysis", "")
+        assistant_content = f"{rating}\n\n{analysis}".strip() if analysis else rating
+
+        sample = {
+            "messages": [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "video", "video": frame_paths},
+                        {"type": "text", "text": "Rate this video from 0 to 100."},
+                    ],
+                },
+                {"role": "assistant", "content": assistant_content},
+            ]
+        }
+        samples.append(sample)
+
+    Path(output_json).parent.mkdir(parents=True, exist_ok=True)
+    with open(output_json, "w") as f:
+        json.dump(samples, f, indent=2)
+
+    print(f"\n✓ Wrote {len(samples)} samples → {output_json}")
 
 
 # ─── Dataset ──────────────────────────────────────────────────────────────────
@@ -319,9 +443,27 @@ def train():
 
 # ─── Inference ────────────────────────────────────────────────────────────────
 
-def inference(frame_paths: list[str], question: str | None = None):
-    """Load the fine-tuned LoRA adapter and rate a video."""
+def inference(
+    video_path: str | None = None,
+    frame_paths: list[str] | None = None,
+    question: str | None = None,
+    fps: float = EXTRACT_FPS,
+):
+    """Load the fine-tuned LoRA adapter and rate a video.
+
+    Provide *either* ``video_path`` (a raw video file — frames are extracted
+    automatically at ``fps``) or ``frame_paths`` (pre-extracted frames).
+    """
+    import tempfile
     from peft import PeftModel
+
+    if video_path and not frame_paths:
+        tmp_dir = tempfile.mkdtemp(prefix="qwen3vl_infer_")
+        print(f"Extracting frames from {video_path} @ {fps} fps ...")
+        frame_paths = extract_frames(video_path, tmp_dir, fps=fps)
+
+    if not frame_paths:
+        raise ValueError("Provide --video or --frames / --frames-dir")
 
     processor = AutoProcessor.from_pretrained(
         OUTPUT_DIR,
@@ -385,29 +527,72 @@ def inference(frame_paths: list[str], question: str | None = None):
 
 if __name__ == "__main__":
     import argparse
-    from pathlib import Path
 
     parser = argparse.ArgumentParser(
         description="Qwen3-VL Video Rating Fine-Tuning",
     )
-    parser.add_argument("--mode", choices=["train", "infer"], default="train")
+    parser.add_argument(
+        "--mode", choices=["preprocess", "train", "infer"], default="train",
+        help=(
+            "preprocess: extract frames from raw videos + build training JSON; "
+            "train: fine-tune the model; "
+            "infer: rate a single video"
+        ),
+    )
+
+    # ── preprocess args ──
+    parser.add_argument(
+        "--annotations", type=str, default="./data/annotations.json",
+        help="Path to annotations JSON (preprocess mode)",
+    )
+    parser.add_argument(
+        "--frames-root", type=str, default=FRAMES_DIR,
+        help="Root directory for extracted frames (preprocess mode)",
+    )
+    parser.add_argument(
+        "--output-json", type=str, default=DATA_PATH,
+        help="Output ShareGPT JSON path (preprocess mode)",
+    )
+
+    # ── inference args ──
+    parser.add_argument(
+        "--video", type=str,
+        help="Path to a video file (inference mode — frames extracted automatically)",
+    )
     parser.add_argument(
         "--frames", type=str, nargs="+",
-        help="Frame image paths for inference (space-separated)",
+        help="Pre-extracted frame paths (inference mode, space-separated)",
     )
     parser.add_argument(
         "--frames-dir", type=str,
-        help="Directory of frame images (sorted alphabetically)",
+        help="Directory of pre-extracted frame images (inference mode)",
     )
     parser.add_argument(
         "--question", type=str,
         default="Rate this video from 0 to 100.",
     )
+
+    # ── shared args ──
+    parser.add_argument(
+        "--fps", type=float, default=EXTRACT_FPS,
+        help=f"Frames per second for extraction (default: {EXTRACT_FPS})",
+    )
+
     args = parser.parse_args()
 
-    if args.mode == "train":
+    if args.mode == "preprocess":
+        preprocess_videos(
+            annotations_path=args.annotations,
+            frames_root=args.frames_root,
+            output_json=args.output_json,
+            fps=args.fps,
+        )
+
+    elif args.mode == "train":
         train()
-    else:
+
+    else:  # infer
+        frame_paths = None
         if args.frames_dir:
             frame_dir = Path(args.frames_dir)
             frame_paths = sorted(
@@ -416,7 +601,10 @@ if __name__ == "__main__":
             )
         elif args.frames:
             frame_paths = args.frames
-        else:
-            parser.error("--frames or --frames-dir required for inference mode")
 
-        inference(frame_paths, args.question)
+        inference(
+            video_path=args.video,
+            frame_paths=frame_paths,
+            question=args.question,
+            fps=args.fps,
+        )

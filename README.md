@@ -14,31 +14,20 @@ QLoRA, Flash Attention 2, and DeepSpeed ZeRO-2.
 | Distributed | **DeepSpeed ZeRO-2** | Shards optimizer + gradients; works single- and multi-GPU |
 | Pixel Tokens | **token × 32 × 32** | Qwen3-VL resolution (Qwen2.5-VL used 28 × 28) |
 
-## Data Format (ShareGPT Multimodal)
+## Pipeline Overview
 
-Each sample is a standard ShareGPT conversation. Videos are represented as a
-chunk of frame images:
-
-```json
-[
-    {
-        "messages": [
-            {"role": "system", "content": "You are a video quality assessment expert..."},
-            {"role": "user", "content": [
-                {"type": "video", "video": [
-                    "data/frames/video_001/frame_001.jpg",
-                    "data/frames/video_001/frame_002.jpg"
-                ]},
-                {"type": "text", "text": "Rate this video from 0 to 100."}
-            ]},
-            {"role": "assistant", "content": "85\n\nGood overall quality..."}
-        ]
-    }
-]
 ```
-
-Put your training data at `data/train.json` (see `data/sample_train.json` for a
-full example).
+raw videos + annotations ──► preprocess ──► ShareGPT JSON + frames
+                                                │
+                                                ▼
+                                             train
+                                                │
+                                                ▼
+              new video ──────────────► infer (auto-extracts frames)
+                                                │
+                                                ▼
+                                          0-100 rating
+```
 
 ## Setup
 
@@ -46,7 +35,7 @@ full example).
 pip install torch torchvision
 pip install transformers accelerate peft bitsandbytes
 pip install deepspeed flash-attn --no-build-isolation
-pip install qwen-vl-utils python-dotenv
+pip install qwen-vl-utils python-dotenv opencv-python
 ```
 
 Create a `.env` with your Hugging Face token:
@@ -55,23 +44,54 @@ Create a `.env` with your Hugging Face token:
 HF_TOKEN=hf_...
 ```
 
-## Prepare Your Frames
+## Step 1 — Prepare Annotations
 
-Organise video frames into directories:
+Create an annotations JSON listing your raw video files with their target
+ratings:
 
+```json
+[
+    {
+        "video": "raw_videos/clip_001.mp4",
+        "rating": 85,
+        "analysis": "Good overall quality with stable framing..."
+    },
+    {
+        "video": "raw_videos/clip_002.mp4",
+        "rating": 42,
+        "analysis": "Heavy compression artifacts, shaky footage..."
+    }
+]
 ```
-data/
-  frames/
-    video_001/
-      frame_001.jpg
-      frame_002.jpg
-      ...
-    video_002/
-      ...
-  train.json
+
+See `data/sample_annotations.json` for a full example.
+
+## Step 2 — Preprocess (Extract Frames)
+
+This reads your raw videos, extracts frames at the target FPS (default 6),
+and writes the ShareGPT-format training JSON automatically:
+
+```bash
+python Qwen3VL.py --mode preprocess \
+    --annotations data/annotations.json \
+    --fps 6
 ```
 
-## Train
+Output:
+- Extracted frames saved to `data/frames/<video_stem>/frame_000001.jpg, ...`
+- Training JSON written to `data/train.json`
+
+You can customise the output paths:
+
+```bash
+python Qwen3VL.py --mode preprocess \
+    --annotations data/annotations.json \
+    --frames-root data/frames \
+    --output-json data/train.json \
+    --fps 6
+```
+
+## Step 3 — Train
 
 **Single GPU (RTX 5080):**
 
@@ -85,28 +105,57 @@ python Qwen3VL.py --mode train
 deepspeed --num_gpus=2 Qwen3VL.py --mode train
 ```
 
-Or with Accelerate:
+## Step 4 — Inference
+
+Just point at a raw video file — frames are extracted automatically:
 
 ```bash
-accelerate launch --config_file accelerate_config.yaml Qwen3VL.py --mode train
+python Qwen3VL.py --mode infer --video path/to/video.mp4
 ```
 
-## Inference
+You can control the extraction FPS:
 
 ```bash
-# From a directory of frames
-python Qwen3VL.py --mode infer --frames-dir data/frames/video_001/
+python Qwen3VL.py --mode infer --video path/to/video.mp4 --fps 6
+```
 
-# From explicit frame paths
+Or use pre-extracted frames directly:
+
+```bash
+# From a directory
+python Qwen3VL.py --mode infer --frames-dir data/frames/clip_001/
+
+# From explicit paths
 python Qwen3VL.py --mode infer \
-    --frames data/frames/video_001/frame_001.jpg data/frames/video_001/frame_002.jpg \
-    --question "Rate this video from 0 to 100."
+    --frames frame_01.jpg frame_02.jpg frame_03.jpg
+```
+
+## Data Format (ShareGPT Multimodal)
+
+The `preprocess` step generates this format automatically. Each sample is a
+standard ShareGPT conversation where videos are chunks of frame images:
+
+```json
+{
+    "messages": [
+        {"role": "system", "content": "You are a video quality assessment expert..."},
+        {"role": "user", "content": [
+            {"type": "video", "video": [
+                "data/frames/clip_001/frame_000001.jpg",
+                "data/frames/clip_001/frame_000002.jpg"
+            ]},
+            {"type": "text", "text": "Rate this video from 0 to 100."}
+        ]},
+        {"role": "assistant", "content": "85\n\nGood overall quality..."}
+    ]
+}
 ```
 
 ## Key Parameters
 
 | Parameter | Default | Notes |
 |---|---|---|
+| `EXTRACT_FPS` | `6` | Frames per second for video extraction |
 | `MIN_PIXELS` | `128 × 32 × 32` | Min pixels per frame |
 | `MAX_PIXELS` | `512 × 32 × 32` | Max pixels per frame (lower = less VRAM) |
 | `MAX_SEQ_LEN` | `4096` | Total sequence length (text + visual tokens) |
