@@ -216,3 +216,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Model outputs / checkpoints
+output/
+checkpoints/
+wandb/
+runs/
