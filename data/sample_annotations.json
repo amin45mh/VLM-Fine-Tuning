@@ -1,0 +1,22 @@
+[
+    {
+        "video": "raw_videos/clip_001.mp4",
+        "rating": 82,
+        "analysis": "The video demonstrates good overall quality with stable framing and consistent lighting. Minor motion blur is present during the transition, and the color grading is slightly warm. Composition follows the rule of thirds effectively."
+    },
+    {
+        "video": "raw_videos/clip_002.mp4",
+        "rating": 45,
+        "analysis": "The video suffers from significant quality issues. There is noticeable camera shake throughout, exposure is inconsistent between frames, and compression artifacts are visible especially in darker regions. The subject is partially out of focus in several frames."
+    },
+    {
+        "video": "raw_videos/clip_003.mp4",
+        "rating": 93,
+        "analysis": "Excellent video quality. The footage is sharp with accurate colors and smooth temporal transitions between frames. Lighting is professional-grade with well-controlled highlights and shadows. Minimal noise even in low-light areas."
+    },
+    {
+        "video": "raw_videos/clip_004.mp4",
+        "rating": 21,
+        "analysis": "Poor video quality. The footage is extremely grainy with heavy compression artifacts throughout. White balance is severely off, producing a strong blue-green cast. Multiple frames show heavy motion blur suggesting very low shutter speed."
+    }
+]

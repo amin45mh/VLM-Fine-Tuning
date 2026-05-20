@@ -1,0 +1,134 @@
+[
+    {
+        "messages": [
+            {
+                "role": "system",
+                "content": "You are a video quality assessment expert. Watch the provided video carefully and rate it on a scale from 0 to 100, where 0 is the worst possible quality and 100 is perfect. Respond with the numerical score first, then a brief analysis."
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "video",
+                        "video": [
+                            "data/frames/video_001/frame_001.jpg",
+                            "data/frames/video_001/frame_002.jpg",
+                            "data/frames/video_001/frame_003.jpg",
+                            "data/frames/video_001/frame_004.jpg",
+                            "data/frames/video_001/frame_005.jpg",
+                            "data/frames/video_001/frame_006.jpg",
+                            "data/frames/video_001/frame_007.jpg",
+                            "data/frames/video_001/frame_008.jpg"
+                        ]
+                    },
+                    {
+                        "type": "text",
+                        "text": "Rate this video from 0 to 100."
+                    }
+                ]
+            },
+            {
+                "role": "assistant",
+                "content": "82\n\nThe video demonstrates good overall quality with stable framing and consistent lighting. Minor motion blur is present in frames 3-5 during the transition, and the color grading is slightly warm. Composition follows the rule of thirds effectively."
+            }
+        ]
+    },
+    {
+        "messages": [
+            {
+                "role": "system",
+                "content": "You are a video quality assessment expert. Watch the provided video carefully and rate it on a scale from 0 to 100, where 0 is the worst possible quality and 100 is perfect. Respond with the numerical score first, then a brief analysis."
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "video",
+                        "video": [
+                            "data/frames/video_002/frame_001.jpg",
+                            "data/frames/video_002/frame_002.jpg",
+                            "data/frames/video_002/frame_003.jpg",
+                            "data/frames/video_002/frame_004.jpg",
+                            "data/frames/video_002/frame_005.jpg",
+                            "data/frames/video_002/frame_006.jpg"
+                        ]
+                    },
+                    {
+                        "type": "text",
+                        "text": "Rate this video from 0 to 100."
+                    }
+                ]
+            },
+            {
+                "role": "assistant",
+                "content": "45\n\nThe video suffers from significant quality issues. There is noticeable camera shake throughout, exposure is inconsistent between frames, and compression artifacts are visible especially in darker regions. The subject is partially out of focus in several frames."
+            }
+        ]
+    },
+    {
+        "messages": [
+            {
+                "role": "system",
+                "content": "You are a video quality assessment expert. Watch the provided video carefully and rate it on a scale from 0 to 100, where 0 is the worst possible quality and 100 is perfect. Respond with the numerical score first, then a brief analysis."
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "video",
+                        "video": [
+                            "data/frames/video_003/frame_001.jpg",
+                            "data/frames/video_003/frame_002.jpg",
+                            "data/frames/video_003/frame_003.jpg",
+                            "data/frames/video_003/frame_004.jpg",
+                            "data/frames/video_003/frame_005.jpg",
+                            "data/frames/video_003/frame_006.jpg",
+                            "data/frames/video_003/frame_007.jpg",
+                            "data/frames/video_003/frame_008.jpg",
+                            "data/frames/video_003/frame_009.jpg",
+                            "data/frames/video_003/frame_010.jpg"
+                        ]
+                    },
+                    {
+                        "type": "text",
+                        "text": "Rate this video from 0 to 100."
+                    }
+                ]
+            },
+            {
+                "role": "assistant",
+                "content": "93\n\nExcellent video quality. The footage is sharp with accurate colors and smooth temporal transitions between frames. Lighting is professional-grade with well-controlled highlights and shadows. Minimal noise even in low-light areas. The only minor deduction is a very slight lens flare visible in the last two frames."
+            }
+        ]
+    },
+    {
+        "messages": [
+            {
+                "role": "system",
+                "content": "You are a video quality assessment expert. Watch the provided video carefully and rate it on a scale from 0 to 100, where 0 is the worst possible quality and 100 is perfect. Respond with the numerical score first, then a brief analysis."
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "video",
+                        "video": [
+                            "data/frames/video_004/frame_001.jpg",
+                            "data/frames/video_004/frame_002.jpg",
+                            "data/frames/video_004/frame_003.jpg",
+                            "data/frames/video_004/frame_004.jpg"
+                        ]
+                    },
+                    {
+                        "type": "text",
+                        "text": "Rate this video from 0 to 100."
+                    }
+                ]
+            },
+            {
+                "role": "assistant",
+                "content": "21\n\nPoor video quality. The footage is extremely grainy with heavy compression artifacts throughout. White balance is severely off, producing a strong blue-green cast. Multiple frames show heavy motion blur suggesting very low shutter speed. Resolution appears well below the expected standard."
+            }
+        ]
+    }
+]
